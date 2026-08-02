@@ -2174,6 +2174,17 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 			return ret;
 		atcphy->pipehandler_up = false;
 	}
+
+	/*
+	 * The USB3 host teardown may still be in flight when the TBT mux request
+	 * arrives.  Reinitializing a live USB3 PHY faults on T6000, so reset the
+	 * old mode before applying the four-lane configuration.
+	 */
+	if (atcphy->mode != APPLE_ATCPHY_MODE_OFF) {
+		ret = atcphy_configure(atcphy, APPLE_ATCPHY_MODE_OFF);
+		if (ret)
+			return ret;
+	}
 	ret = atcphy_configure(atcphy, target_mode);
 	if (target_mode == APPLE_ATCPHY_MODE_TBT)
 		dev_info(atcphy->dev, "T6000/TBT PHY transition %s: %d\n",
