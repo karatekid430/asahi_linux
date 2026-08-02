@@ -42,11 +42,15 @@
 	model = "MacBook Pro J314";
 };
 
-/* USB4 / Thunderbolt is wired to the left-rear USB-C connector. */
+/* USB4 / Thunderbolt routers map one-to-one to the three USB-C connectors. */
 / {
 	aliases {
 		usb4_0_acio = &usb4_0_acio;
 		usb4_0_nhi = &usb4_0_nhi;
+		usb4_1_acio = &usb4_1_acio;
+		usb4_1_nhi = &usb4_1_nhi;
+		usb4_2_acio = &usb4_2_acio;
+		usb4_2_nhi = &usb4_2_nhi;
 	};
 };
 
@@ -61,6 +65,28 @@
 	};
 };
 
+&typec1 {
+	ports {
+		port@2 {
+			reg = <2>;
+			typec1_connector_tbt: endpoint {
+				remote-endpoint = <&usb4_1_acio_tbt>;
+			};
+		};
+	};
+};
+
+&typec2 {
+	ports {
+		port@2 {
+			reg = <2>;
+			typec2_connector_tbt: endpoint {
+				remote-endpoint = <&usb4_2_acio_tbt>;
+			};
+		};
+	};
+};
+
 &usb4_0_acio {
 	ports {
 		#address-cells = <1>;
@@ -70,6 +96,34 @@
 			reg = <1>;
 			usb4_0_acio_tbt: endpoint {
 				remote-endpoint = <&typec0_connector_tbt>;
+			};
+		};
+	};
+};
+
+&usb4_1_acio {
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			usb4_1_acio_tbt: endpoint {
+				remote-endpoint = <&typec1_connector_tbt>;
+			};
+		};
+	};
+};
+
+&usb4_2_acio {
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			usb4_2_acio_tbt: endpoint {
+				remote-endpoint = <&typec2_connector_tbt>;
 			};
 		};
 	};
