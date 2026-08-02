@@ -57,6 +57,7 @@
 #include <linux/delay.h>
 #include <linux/iopoll.h>
 #include <linux/iommu.h>
+#include <linux/mfd/macsmc.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -113,6 +114,8 @@ struct apple_cio {
 	struct platform_device *pdev;
 	struct device_node *np;
 	struct apple_rtkit *rtk;
+	struct apple_smc *smc;
+	u32 vdd_cio_enable;
 
 	void __iomem *rc_base;
 	struct resource *rc_res;
@@ -636,6 +639,25 @@ static int apple_cio_start(struct apple_cio *acio)
 	acio->pd_runtime_refs = true;
 
 	/*
+	 * AppleT6000PMGR enables VDD_CIO through the platform function
+	 * "function-toggle_vdd_cio" before it touches the ACIO M3.  On the
+	 * J314/J316 ADT that function is an SMC pKW4 call for key pmVC, with
+	 * value 0x101.  Without this rail, the first ACIO register transaction
+	 * is reported as an asynchronous SError by the fabric.
+	 */
+	if (acio->vdd_cio_enable) {
+		ret = apple_smc_write_u32(acio->smc, SMC_KEY(pmVC),
+					  acio->vdd_cio_enable);
+		if (ret < 0) {
+			dev_err(acio->dev,
+				"failed to enable T6000 VDD_CIO through SMC pmVC: %d\n", ret);
+			goto put_runtime_refs;
+		}
+		dev_info(acio->dev, "T6000 ACIO: enabled VDD_CIO (pmVC = %#x)\n",
+			 acio->vdd_cio_enable);
+	}
+
+	/*
 	 * T8103 requires a handshake through the ACIO control aperture before
 	 * starting the M3.  T6000 uses a different control protocol, so its early
 	 * startup must not perform this request/poll sequence.
@@ -813,6 +835,8 @@ static int apple_cio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct apple_cio *acio;
+	struct device_node *smc_np;
+	struct platform_device *smc_pdev;
 	struct resource *res;
 	int ret;
 
@@ -828,6 +852,24 @@ static int apple_cio_probe(struct platform_device *pdev)
 	acio->pdev = pdev;
 	acio->dev = &pdev->dev;
 	acio->np = dev->of_node;
+
+	if (!of_property_read_u32(acio->np, "apple,vdd-cio-enable",
+				  &acio->vdd_cio_enable)) {
+		smc_np = of_parse_phandle(acio->np, "apple,smc", 0);
+		if (!smc_np)
+			return dev_err_probe(dev, -EINVAL,
+				"VDD_CIO enable requires an Apple SMC\n");
+
+		smc_pdev = of_find_device_by_node(smc_np);
+		of_node_put(smc_np);
+		if (!smc_pdev)
+			return -EPROBE_DEFER;
+
+		acio->smc = dev_get_drvdata(&smc_pdev->dev);
+		put_device(&smc_pdev->dev);
+		if (!acio->smc)
+			return -EPROBE_DEFER;
+	}
 
 	acio->sram_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "sram");
 	if (!acio->sram_res)
