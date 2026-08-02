@@ -396,13 +396,16 @@ static int apple_nhi_probe(struct platform_device *pdev)
 				    "Unable to map NHI tunable regs");
 		goto err;
 	}
-	tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np, "apple,tunable-nhi",
-					  tunable_res);
-	if (IS_ERR(tunable)) {
-		ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable), "Unable to load NHI tunable");
-		goto err;
+	if (of_find_property(anhi->np, "apple,tunable-nhi", NULL)) {
+		tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np,
+						  "apple,tunable-nhi", tunable_res);
+		if (IS_ERR(tunable)) {
+			ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable),
+					    "Unable to load NHI tunable");
+			goto err;
+		}
+		apple_tunable_apply(tunable_base, tunable);
 	}
-	apple_tunable_apply(tunable_base, tunable);
 
 	ret = apple_nhi_probe_irqs(anhi);
 	if (ret)
@@ -600,8 +603,10 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 	dev_dbg(acio->dev, "M3 firmware is ready\n");
 
-	apple_tunable_apply(acio->rc_base, acio->rc_tunable);
-	dev_dbg(acio->dev, "RC tunables have been applied\n");
+	if (acio->rc_tunable) {
+		apple_tunable_apply(acio->rc_base, acio->rc_tunable);
+		dev_dbg(acio->dev, "RC tunables have been applied\n");
+	}
 	if (acio->pcie_tunable) {
 		apple_tunable_apply(acio->pcie_base, acio->pcie_tunable);
 		dev_dbg(acio->dev, "PCIe adapter tunables have been applied\n");
@@ -741,10 +746,13 @@ static int apple_cio_probe(struct platform_device *pdev)
 	acio->rc_base = devm_ioremap_resource(&pdev->dev, acio->rc_res);
 	if (IS_ERR(acio->rc_base))
 		return dev_err_probe(dev, PTR_ERR(acio->rc_base), "Unable to map rc regs");
-	acio->rc_tunable =
-		devm_apple_tunable_parse(dev, acio->np, "apple,tunable-rc", acio->rc_res);
-	if (IS_ERR(acio->rc_tunable))
-		return dev_err_probe(dev, PTR_ERR(acio->rc_tunable), "Unable to load rc tunable");
+	if (of_find_property(acio->np, "apple,tunable-rc", NULL)) {
+		acio->rc_tunable = devm_apple_tunable_parse(dev, acio->np,
+							    "apple,tunable-rc", acio->rc_res);
+		if (IS_ERR(acio->rc_tunable))
+			return dev_err_probe(dev, PTR_ERR(acio->rc_tunable),
+					     "Unable to load rc tunable");
+	}
 
 	acio->pcie_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie");
 	if (acio->pcie_res) {
