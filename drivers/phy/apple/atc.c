@@ -2081,6 +2081,7 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 {
 	struct apple_atcphy *atcphy = typec_mux_get_drvdata(mux);
 	enum atcphy_mode target_mode;
+	int ret;
 
 	guard(mutex)(&atcphy->lock);
 
@@ -2136,6 +2137,8 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 
 	if (atcphy->mode == target_mode)
 		return 0;
+	if (target_mode == APPLE_ATCPHY_MODE_TBT)
+		dev_info(atcphy->dev, "T6000/TBT PHY transition begin\n");
 
 	/*
 	 * If the pipehandler is still/already up here there's a bug somewhere so make sure to
@@ -2143,7 +2146,11 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 	 * in the worst case the hardware will fall back to USB2-only.
 	 */
 	WARN_ON_ONCE(atcphy->pipehandler_up);
-	return atcphy_configure(atcphy, target_mode);
+	ret = atcphy_configure(atcphy, target_mode);
+	if (target_mode == APPLE_ATCPHY_MODE_TBT)
+		dev_info(atcphy->dev, "T6000/TBT PHY transition %s: %d\n",
+			 ret ? "failed" : "complete", ret);
+	return ret;
 }
 
 static int atcphy_probe_mux(struct apple_atcphy *atcphy)

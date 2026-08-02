@@ -643,6 +643,8 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 
 	/* Start and wait for the co-processor to boot */
+	if (acio->skip_ctrl_handshake)
+		dev_info(acio->dev, "T6000 ACIO: starting M3\n");
 	writel(APPLE_CIO_M3_CTRL_START, acio->rc_base + APPLE_CIO_M3_CTRL);
 	acio->rtk = apple_rtkit_init(acio->dev, acio, NULL, 0, &apple_cio_rtkit_ops);
 	if (IS_ERR(acio->rtk)) {
@@ -672,6 +674,8 @@ static int apple_cio_start(struct apple_cio *acio)
 		dev_dbg(acio->dev, "RC tunables have been applied\n");
 	}
 	if (acio->skip_ctrl_handshake)
+		dev_info(acio->dev, "T6000 ACIO: programming router fabrics\n");
+	if (acio->skip_ctrl_handshake)
 		apple_cio_t6000_fabric_init(acio);
 	if (acio->pcie_tunable) {
 		apple_tunable_apply(acio->pcie_base, acio->pcie_tunable);
@@ -682,6 +686,8 @@ static int apple_cio_start(struct apple_cio *acio)
 	 * Bring up devices which are part of ACIO and are now accessibly by the main SoC
 	 * and specifically wait for the NHI to be up to prevent concurrent shutdowns.
 	 */
+	if (acio->skip_ctrl_handshake)
+		dev_info(acio->dev, "T6000 ACIO: probing NHI\n");
 	reinit_completion(&acio->nhi_boot_completion);
 	ret = of_platform_populate(acio->np, NULL, NULL, acio->dev);
 	if (ret) {
