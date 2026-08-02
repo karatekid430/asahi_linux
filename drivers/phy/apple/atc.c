@@ -2184,6 +2184,9 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 		ret = atcphy_configure(atcphy, APPLE_ATCPHY_MODE_OFF);
 		if (ret)
 			return ret;
+		if (target_mode == APPLE_ATCPHY_MODE_TBT &&
+		    of_device_is_compatible(atcphy->np, "apple,t6000-atcphy"))
+			usleep_range(10000, 12000);
 	}
 	ret = atcphy_configure(atcphy, target_mode);
 	if (target_mode == APPLE_ATCPHY_MODE_TBT)
