@@ -660,6 +660,15 @@ static void cd321x_typec_update_mode(struct tps6598x *tps, struct cd321x_status 
 		.state = TYPEC_TBT_SWITCH_MODE_OFF,
 	};
 
+	/*
+	 * Apple CD321x firmware revisions do not all use the documented data
+	 * status layout.  Keep the raw value in the kernel log while bringing up
+	 * new Apple SoCs so the TBT/USB4 state can be decoded from the firmware
+	 * rather than inferred from the USB fallback path.
+	 */
+	dev_info(tps->dev, "CD321x status %#x data-status %#x\n",
+		 st->status, st->data_status);
+
 	if (!(st->data_status & TPS_DATA_STATUS_DATA_CONNECTION)) {
 		if (cd321x->state.mode == TYPEC_STATE_SAFE)
 			return;
