@@ -566,6 +566,21 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 
 	/*
+	 * T6000 raises an asynchronous SError for any ACIO control-register
+	 * access while one of the router domains is still off.  Do not touch the
+	 * block until runtime PM has made every explicitly-managed domain active.
+	 */
+	for (i = 0; i < acio->pd_list->num_pds; i++) {
+		if (pm_runtime_active(acio->pd_list->pd_devs[i]))
+			continue;
+
+		dev_err(acio->dev, "ACIO power domain %s did not become active\n",
+			dev_name(acio->pd_list->pd_devs[i]));
+		ret = -EAGAIN;
+		goto remove_links;
+	}
+
+	/*
 	 * After the power domains are on we need to signal and wait for the ACIO block
 	 * to actually start before we can bring up the co-processor.
 	 */
