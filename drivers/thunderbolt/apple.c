@@ -698,10 +698,11 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	/* Once NHI is up it will update current_cable_info */
 	wait_for_completion(&acio->nhi_boot_completion);
-	if (acio->skip_ctrl_handshake &&
-	    acio->current_cable_info == acio->target_cable_info)
-		writel(APPLE_CIO_CTRL_NHI_READY,
-		       acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
+	/*
+	 * T6000 control offset 0 is not the T8103 status register.  Accessing it
+	 * after NHI registration has raised an asynchronous SError at 0x701db0000,
+	 * so do not use it as an NHI-ready doorbell until its semantics are known.
+	 */
 	dev_dbg(acio->dev, "NHI boot completed.\n");
 	return 0;
 
