@@ -530,11 +530,14 @@ static int apple_cio_stop(struct apple_cio *acio)
 
 	/* Try to shut down and power off the co-processor gracefully */
 	dev_dbg(acio->dev, "shutting RTKit down\n");
-	ret = apple_rtkit_poweroff(acio->rtk);
-	if (ret)
-		dev_warn(acio->dev,
-			 "Failed to shutdown M3 RTKit, continuing ACIO shutdown anyway\n");
-	apple_rtkit_free(acio->rtk);
+	if (acio->rtk) {
+		ret = apple_rtkit_poweroff(acio->rtk);
+		if (ret)
+			dev_warn(acio->dev,
+				 "Failed to shutdown M3 RTKit, continuing ACIO shutdown anyway\n");
+		apple_rtkit_free(acio->rtk);
+		acio->rtk = NULL;
+	}
 	dev_dbg(acio->dev, "RTKit is freed\n");
 
 	/* Finally, remove the links to the PD domains to power everything off */
@@ -583,8 +586,8 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	/*
 	 * T8103 requires a handshake through the ACIO control aperture before
-	 * starting the M3.  On T6000 macOS starts the M3 directly; touching this
-	 * aperture instead raises an asynchronous SError.
+	 * starting the M3.  T6000 does not use this aperture; touching it raises
+	 * an asynchronous SError.
 	 */
 	if (!acio->skip_ctrl_handshake) {
 		writel(APPLE_CIO_CTRL_STATUS_INIT_REQ,
@@ -596,6 +599,23 @@ static int apple_cio_start(struct apple_cio *acio)
 			goto remove_links;
 		}
 		dev_dbg(acio->dev, "ACIO block has started\n");
+	}
+
+	/*
+	 * T6000's ACIO firmware is brought up by its power domains.  macOS then
+	 * accesses the NHI directly; it does not access the legacy control/M3
+	 * apertures or boot an RTKit instance from the AP.
+	 */
+	if (acio->skip_ctrl_handshake) {
+		reinit_completion(&acio->nhi_boot_completion);
+		ret = of_platform_populate(acio->np, NULL, NULL, acio->dev);
+		if (ret) {
+			dev_err(acio->dev, "failed to populate children: %d\n", ret);
+			goto remove_links;
+		}
+
+		wait_for_completion(&acio->nhi_boot_completion);
+		return 0;
 	}
 
 	/* Start and wait for the co-processor to boot */
