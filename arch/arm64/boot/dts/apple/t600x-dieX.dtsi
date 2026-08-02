@@ -681,6 +681,9 @@
 			<0x7 0x01080000 0x0 0x20000>;
 		reg-names = "ctrl", "rc", "sram";
 
+		/* pcie_adapter_regs_tunables from the T6000 ACIO ADT node. */
+		apple,tunable-rc = <0x1008 0x4 0x6>;
+
 		mboxes = <&DIE_NODE(usb4_0_mbox)>;
 
 		/* These are managed explicitly while a USB4/TBT cable is present. */
