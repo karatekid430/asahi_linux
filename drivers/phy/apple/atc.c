@@ -2342,9 +2342,25 @@ static int atcphy_map_resources(struct platform_device *pdev, struct apple_atcph
 			continue;
 
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, resources[i].name);
-		*resources[i].addr = devm_ioremap_resource(&pdev->dev, res);
-		if (IS_ERR(resources[i].addr))
-			return dev_err_probe(atcphy->dev, PTR_ERR(resources[i].addr),
+		if (resources[i].addr == &atcphy->regs.tbt)
+			/*
+			 * This aperture is also claimed by the firmware's TBT fabric
+			 * node.  It is nevertheless the ATC PHY register bank XNU
+			 * programs during the USB3-to-TBT transition, so map it without
+			 * taking a second exclusive resource reservation.
+			 *
+			 * devm_ioremap_resource() returns -EBUSY here on J314/J316.
+			 */
+			*resources[i].addr = devm_ioremap(&pdev->dev, res->start,
+							  resource_size(res));
+		else
+			*resources[i].addr = devm_ioremap_resource(&pdev->dev, res);
+
+		if (IS_ERR(*resources[i].addr))
+			return dev_err_probe(atcphy->dev, PTR_ERR(*resources[i].addr),
+					     "Unable to map %s regs", resources[i].name);
+		if (!*resources[i].addr)
+			return dev_err_probe(atcphy->dev, -ENOMEM,
 					     "Unable to map %s regs", resources[i].name);
 
 		if (resources[i].res)
