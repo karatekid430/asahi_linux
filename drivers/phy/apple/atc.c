@@ -609,8 +609,6 @@ struct apple_atcphy {
 	struct {
 		void __iomem *core;
 		void __iomem *axi2af;
-		/* T6000-only 16 MiB ATC Thunderbolt control aperture. */
-		void __iomem *tbt;
 		void __iomem *usb2phy;
 		void __iomem *pipehandler;
 		void __iomem *lpdptx;
@@ -879,15 +877,13 @@ static const struct atcphy_mode_configuration *atcphy_get_mode_config(struct app
 		return &atcphy_modes[mode].normal;
 }
 
-static void atcphy_apply_tunables(struct apple_atcphy *atcphy, enum atcphy_mode mode,
-				  bool apply_axi2af)
+static void atcphy_apply_tunables(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 {
 	const int lane0 = atcphy->swap_lanes ? 1 : 0;
 	const int lane1 = atcphy->swap_lanes ? 0 : 1;
 
 	apple_tunable_apply(atcphy->regs.core, atcphy->tunables.common[0]);
-	if (apply_axi2af)
-		apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
+	apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
 	apple_tunable_apply(atcphy->regs.core, atcphy->tunables.common[1]);
 
 	switch (mode) {
@@ -1696,88 +1692,14 @@ static void atcphy_usb2_power_on(struct apple_atcphy *atcphy)
 	writel(USB2PHY_USBCTL_RUN, atcphy->regs.usb2phy + USB2PHY_USBCTL);
 }
 
-/*
- * T6000 has a per-port ATC control aperture outside the normal PHY core
- * window.  XNU programs it before every USB3-to-Thunderbolt transition.  It
- * is not present on T8103, and leaving it at reset makes the subsequent ACIO
- * M3 start generate an asynchronous external abort.
- *
- * This is the complete write sequence observed on a J314s running macOS
- * 14.8.3.  The status reads between several writes only observe the values
- * written by the preceding step, so retaining the write ordering is enough.
- */
-static void atcphy_t6000_tbt_bootstrap(struct apple_atcphy *atcphy)
-{
-	void __iomem *tbt = atcphy->regs.tbt;
-
-	set32(tbt + 0x00, BIT(0));
-	mask32(tbt + 0x10, 0x0fff0000, 0x000d0000);
-	set32(tbt + 0x14, BIT(0));
-	set32(tbt + 0x18, BIT(0));
-	set32(tbt + 0x1c, GENMASK(1, 0));
-	set32(tbt + 0x20, GENMASK(1, 0));
-	set32(tbt + 0x24, GENMASK(1, 0));
-	set32(tbt + 0x28, GENMASK(1, 0));
-	set32(tbt + 0x2c, GENMASK(1, 0));
-	writel(0x40a10302, tbt + 0x400);
-	writel(0x01ffffff, tbt + 0x600);
-	writel(0, tbt + 0x900);
-	writel(0, tbt + 0x930);
-	set32(tbt + 0x410, BIT(12));
-	set32(tbt + 0x420, BIT(12));
-	set32(tbt + 0x430, BIT(12));
-	set32(tbt + 0x8000, BIT(3) | BIT(0));
-	set32(tbt + 0x820, BIT(7));
-
-	writel(0x7, tbt + 0x8008);
-	writel(0x1, tbt + 0x8014);
-	writel(0x1, tbt + 0x8018);
-	writel(0x1, tbt + 0x748);
-	writel(0x2, tbt + 0x8208);
-	writel(0x20, tbt + 0x8280);
-	writel(0x3, tbt + 0x8288);
-	writel(0xc, tbt + 0x828c);
-	writel(0x18, tbt + 0x8290);
-	writel(0x30, tbt + 0x8294);
-	writel(0x78, tbt + 0x8298);
-	writel(0xf0, tbt + 0x829c);
-	writel(0x1, tbt + 0x82b8);
-	writel(0x1, tbt + 0x82bc);
-	writel(0x1, tbt + 0x82c0);
-	writel(0x1, tbt + 0x748);
-	writel(0x3, tbt + 0x820c);
-	writel(0x20, tbt + 0x8284);
-	writel(0x3, tbt + 0x82a0);
-	writel(0xc, tbt + 0x82a4);
-	writel(0x18, tbt + 0x82a8);
-	writel(0x30, tbt + 0x82ac);
-	writel(0x78, tbt + 0x82b0);
-	writel(0xf0, tbt + 0x82b4);
-	writel(0x3, tbt + 0x82b8);
-	writel(0x2, tbt + 0x82bc);
-	writel(0x3, tbt + 0x82c0);
-	writel(0, tbt + 0x8210);
-	writel(0xd, tbt + 0x8408);
-	writel(0x3, tbt + 0x8418);
-	writel(0, tbt + 0x841c);
-	writel(~0, tbt + 0x8420);
-	writel(0, tbt + 0x8424);
-	writel(0xfff, tbt + 0x8428);
-}
-
 static int atcphy_power_on(struct apple_atcphy *atcphy)
 {
 	u32 reg;
 	int ret;
-	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 
 	atcphy_usb2_power_on(atcphy);
-	if (t6000)
-		dev_info(atcphy->dev, "T6000/TBT PHY: USB2 power complete\n");
 
 	core_set32(atcphy, ATCPHY_MISC, ATCPHY_MISC_RESET_N);
-	if (t6000)
-		dev_info(atcphy->dev, "T6000/TBT PHY: misc reset released\n");
 
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_SLEEP_SMALL);
 	ret = readl_poll_timeout(atcphy->regs.core + ATCPHY_POWER_STAT, reg,
@@ -1786,8 +1708,6 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 		dev_err(atcphy->dev, "failed to wakeup atcphy \"small\"\n");
 		return ret;
 	}
-	if (t6000)
-		dev_info(atcphy->dev, "T6000/TBT PHY: small power complete\n");
 
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_SLEEP_BIG);
 	ret = readl_poll_timeout(atcphy->regs.core + ATCPHY_POWER_STAT, reg,
@@ -1796,13 +1716,9 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 		dev_err(atcphy->dev, "failed to wakeup atcphy \"big\"\n");
 		return ret;
 	}
-	if (t6000)
-		dev_info(atcphy->dev, "T6000/TBT PHY: big power complete\n");
 
 	core_clear32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_CLAMP_EN);
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_APB_RESET_N);
-	if (t6000)
-		dev_info(atcphy->dev, "T6000/TBT PHY: power on complete\n");
 
 	return 0;
 }
@@ -1810,8 +1726,6 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 {
 	int ret = 0;
-	bool tbt = mode == APPLE_ATCPHY_MODE_TBT;
-	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 
 	lockdep_assert_held(&atcphy->lock);
 
@@ -1821,65 +1735,47 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 		return ret;
 	}
 
-	/*
-	 * On T6000, macOS restores AXI2AF before waking the ATC power domains.
-	 * The generic T8103 ordering programs it after power_on(), which leaves
-	 * a USB3-to-TBT handoff using reset AXI-to-fabric state.
-	 */
-	if (t6000 && tbt)
-		atcphy_t6000_tbt_bootstrap(atcphy);
-	if (t6000 && tbt)
-		apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
-
-	if (tbt)
-		dev_info(atcphy->dev, "T6000/TBT PHY: power on\n");
 	ret = atcphy_power_on(atcphy);
 	if (ret)
 		return ret;
 
-	if (tbt)
-		dev_info(atcphy->dev, "T6000/TBT PHY: apply tunables\n");
-	atcphy_apply_tunables(atcphy, mode, !(t6000 && tbt));
+	atcphy_apply_tunables(atcphy, mode);
 
-	if (!t6000) {
-		core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
-		core_set32(atcphy, AUSPLL_APB_CMD_OVERRIDE, AUSPLL_APB_CMD_OVERRIDE_UNK28);
+	core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
+	core_set32(atcphy, AUSPLL_APB_CMD_OVERRIDE, AUSPLL_APB_CMD_OVERRIDE_UNK28);
 
-		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_SMALL_OV);
-		udelay(10);
-		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_BIG_OV);
-		udelay(10);
-		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_CLAMP_OV);
-		udelay(10);
+	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_SMALL_OV);
+	udelay(10);
+	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_BIG_OV);
+	udelay(10);
+	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_CLAMP_OV);
+	udelay(10);
 
-		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_SMALL_OV,
-		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_SMALL_OV, 3));
-		udelay(10);
-		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_BIG_OV,
-		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_BIG_OV, 3));
-		udelay(10);
-		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV,
-		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV, 3));
-		udelay(10);
+	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_SMALL_OV,
+	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_SMALL_OV, 3));
+	udelay(10);
+	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_BIG_OV,
+	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_BIG_OV, 3));
+	udelay(10);
+	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV,
+	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV, 3));
+	udelay(10);
 
-		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_BIG_OV,
-		       FIELD_PREP(ACIOPHY_CFG0_RX_BIG_OV, 3));
-		udelay(10);
-		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_SMALL_OV,
-		       FIELD_PREP(ACIOPHY_CFG0_RX_SMALL_OV, 3));
-		udelay(10);
-		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_CLAMP_OV,
-		       FIELD_PREP(ACIOPHY_CFG0_RX_CLAMP_OV, 3));
-		udelay(10);
-	}
+	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_BIG_OV,
+	       FIELD_PREP(ACIOPHY_CFG0_RX_BIG_OV, 3));
+	udelay(10);
+	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_SMALL_OV,
+	       FIELD_PREP(ACIOPHY_CFG0_RX_SMALL_OV, 3));
+	udelay(10);
+	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_CLAMP_OV,
+	       FIELD_PREP(ACIOPHY_CFG0_RX_CLAMP_OV, 3));
+	udelay(10);
 
 	/* Setup AUX channel if DP altmode is requested */
 	if (atcphy_modes[mode].enable_dp_aux)
 		atcphy_enable_dp_aux(atcphy);
 
 	/* Enable clocks and configure lanes */
-	if (tbt)
-		dev_info(atcphy->dev, "T6000/TBT PHY: program lanes\n");
 	core_set32(atcphy, CIO3PLL_CLK_CTRL, CIO3PLL_CLK_PCLK_EN);
 	core_set32(atcphy, CIO3PLL_CLK_CTRL, CIO3PLL_CLK_REFCLK_EN);
 	atcphy_configure_lanes(atcphy, mode);
@@ -2245,32 +2141,11 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 		dev_info(atcphy->dev, "T6000/TBT PHY transition begin\n");
 
 	/*
-	 * The USB3 host is torn down asynchronously when a Thunderbolt cable is
-	 * discovered.  On T6000 the Type-C mux callback can arrive first, so put
-	 * the PIPE handler in its dummy state ourselves before changing all four
-	 * lanes to TBT.  A WARN here is fatal on panic-on-warn configurations and
-	 * leaves the PHY half switched.
+	 * If the pipehandler is still/already up here there's a bug somewhere so make sure to
+	 * complain loudly. We can still try to switch modes and hope for the best though,
+	 * in the worst case the hardware will fall back to USB2-only.
 	 */
-	if (atcphy->pipehandler_up) {
-		ret = atcphy_configure_pipehandler_dummy(atcphy);
-		if (ret)
-			return ret;
-		atcphy->pipehandler_up = false;
-	}
-
-	/*
-	 * The USB3 host teardown may still be in flight when the TBT mux request
-	 * arrives.  Reinitializing a live USB3 PHY faults on T6000, so reset the
-	 * old mode before applying the four-lane configuration.
-	 */
-	if (atcphy->mode != APPLE_ATCPHY_MODE_OFF) {
-		ret = atcphy_configure(atcphy, APPLE_ATCPHY_MODE_OFF);
-		if (ret)
-			return ret;
-		if (target_mode == APPLE_ATCPHY_MODE_TBT &&
-		    of_device_is_compatible(atcphy->np, "apple,t6000-atcphy"))
-			usleep_range(10000, 12000);
-	}
+	WARN_ON_ONCE(atcphy->pipehandler_up);
 	ret = atcphy_configure(atcphy, target_mode);
 	if (target_mode == APPLE_ATCPHY_MODE_TBT)
 		dev_info(atcphy->dev, "T6000/TBT PHY transition %s: %d\n",
@@ -2322,7 +2197,6 @@ static int atcphy_load_tunables(struct apple_atcphy *atcphy)
 
 static int atcphy_map_resources(struct platform_device *pdev, struct apple_atcphy *atcphy)
 {
-	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 	struct {
 		const char *name;
 		void __iomem **addr;
@@ -2331,36 +2205,16 @@ static int atcphy_map_resources(struct platform_device *pdev, struct apple_atcph
 		{ "core", &atcphy->regs.core, &atcphy->res.core },
 		{ "lpdptx", &atcphy->regs.lpdptx, NULL },
 		{ "axi2af", &atcphy->regs.axi2af, &atcphy->res.axi2af },
-		{ "tbt", &atcphy->regs.tbt, NULL },
 		{ "usb2phy", &atcphy->regs.usb2phy, NULL },
 		{ "pipehandler", &atcphy->regs.pipehandler, NULL },
 	};
 	struct resource *res;
 
 	for (int i = 0; i < ARRAY_SIZE(resources); i++) {
-		if (resources[i].addr == &atcphy->regs.tbt && !t6000)
-			continue;
-
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, resources[i].name);
-		if (resources[i].addr == &atcphy->regs.tbt)
-			/*
-			 * This aperture is also claimed by the firmware's TBT fabric
-			 * node.  It is nevertheless the ATC PHY register bank XNU
-			 * programs during the USB3-to-TBT transition, so map it without
-			 * taking a second exclusive resource reservation.
-			 *
-			 * devm_ioremap_resource() returns -EBUSY here on J314/J316.
-			 */
-			*resources[i].addr = devm_ioremap(&pdev->dev, res->start,
-							  resource_size(res));
-		else
-			*resources[i].addr = devm_ioremap_resource(&pdev->dev, res);
-
-		if (IS_ERR(*resources[i].addr))
-			return dev_err_probe(atcphy->dev, PTR_ERR(*resources[i].addr),
-					     "Unable to map %s regs", resources[i].name);
-		if (!*resources[i].addr)
-			return dev_err_probe(atcphy->dev, -ENOMEM,
+		*resources[i].addr = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(resources[i].addr))
+			return dev_err_probe(atcphy->dev, PTR_ERR(resources[i].addr),
 					     "Unable to map %s regs", resources[i].name);
 
 		if (resources[i].res)
