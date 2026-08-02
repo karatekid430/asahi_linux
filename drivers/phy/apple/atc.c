@@ -877,13 +877,15 @@ static const struct atcphy_mode_configuration *atcphy_get_mode_config(struct app
 		return &atcphy_modes[mode].normal;
 }
 
-static void atcphy_apply_tunables(struct apple_atcphy *atcphy, enum atcphy_mode mode)
+static void atcphy_apply_tunables(struct apple_atcphy *atcphy, enum atcphy_mode mode,
+				  bool apply_axi2af)
 {
 	const int lane0 = atcphy->swap_lanes ? 1 : 0;
 	const int lane1 = atcphy->swap_lanes ? 0 : 1;
 
 	apple_tunable_apply(atcphy->regs.core, atcphy->tunables.common[0]);
-	apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
+	if (apply_axi2af)
+		apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
 	apple_tunable_apply(atcphy->regs.core, atcphy->tunables.common[1]);
 
 	switch (mode) {
@@ -1748,6 +1750,14 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 		return ret;
 	}
 
+	/*
+	 * On T6000, macOS restores AXI2AF before waking the ATC power domains.
+	 * The generic T8103 ordering programs it after power_on(), which leaves
+	 * a USB3-to-TBT handoff using reset AXI-to-fabric state.
+	 */
+	if (t6000 && tbt)
+		apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
+
 	if (tbt)
 		dev_info(atcphy->dev, "T6000/TBT PHY: power on\n");
 	ret = atcphy_power_on(atcphy);
@@ -1756,7 +1766,7 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 
 	if (tbt)
 		dev_info(atcphy->dev, "T6000/TBT PHY: apply tunables\n");
-	atcphy_apply_tunables(atcphy, mode);
+	atcphy_apply_tunables(atcphy, mode, !(t6000 && tbt));
 
 	if (!t6000) {
 		core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
