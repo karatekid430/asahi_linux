@@ -69,26 +69,6 @@
 	status = "okay";
 };
 
-/*
- * AppleT6000PMGR enables this rail through function-toggle_vdd_cio before
- * starting an ACIO M3.  The ADT maps that function to an SMC pKW4 write of
- * key pmVC with value 0x101 on M1 Pro laptops.
- */
-&usb4_0_acio {
-	apple,smc = <&smc>;
-	apple,vdd-cio-enable = <0x101>;
-};
-
-&usb4_1_acio {
-	apple,smc = <&smc>;
-	apple,vdd-cio-enable = <0x101>;
-};
-
-&usb4_2_acio {
-	apple,smc = <&smc>;
-	apple,vdd-cio-enable = <0x101>;
-};
-
 &dcp {
 	panel: panel {
 		apple,max-brightness = <500>;
