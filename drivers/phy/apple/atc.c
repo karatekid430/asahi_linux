@@ -1727,6 +1727,7 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 {
 	int ret = 0;
 	bool tbt = mode == APPLE_ATCPHY_MODE_TBT;
+	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 
 	lockdep_assert_held(&atcphy->lock);
 
@@ -1746,37 +1747,37 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 		dev_info(atcphy->dev, "T6000/TBT PHY: apply tunables\n");
 	atcphy_apply_tunables(atcphy, mode);
 
-	if (tbt)
-		dev_info(atcphy->dev, "T6000/TBT PHY: program common controls\n");
-	core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
-	core_set32(atcphy, AUSPLL_APB_CMD_OVERRIDE, AUSPLL_APB_CMD_OVERRIDE_UNK28);
+	if (!t6000) {
+		core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
+		core_set32(atcphy, AUSPLL_APB_CMD_OVERRIDE, AUSPLL_APB_CMD_OVERRIDE_UNK28);
 
-	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_SMALL_OV);
-	udelay(10);
-	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_BIG_OV);
-	udelay(10);
-	set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_CLAMP_OV);
-	udelay(10);
+		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_SMALL_OV);
+		udelay(10);
+		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_BIG_OV);
+		udelay(10);
+		set32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_COMMON_CLAMP_OV);
+		udelay(10);
 
-	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_SMALL_OV,
-	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_SMALL_OV, 3));
-	udelay(10);
-	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_BIG_OV,
-	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_BIG_OV, 3));
-	udelay(10);
-	mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV,
-	       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV, 3));
-	udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_SMALL_OV,
+		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_SMALL_OV, 3));
+		udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_BIG_OV,
+		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_BIG_OV, 3));
+		udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_SLEEP_CTRL, ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV,
+		       FIELD_PREP(ACIOPHY_SLEEP_CTRL_TX_CLAMP_OV, 3));
+		udelay(10);
 
-	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_BIG_OV,
-	       FIELD_PREP(ACIOPHY_CFG0_RX_BIG_OV, 3));
-	udelay(10);
-	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_SMALL_OV,
-	       FIELD_PREP(ACIOPHY_CFG0_RX_SMALL_OV, 3));
-	udelay(10);
-	mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_CLAMP_OV,
-	       FIELD_PREP(ACIOPHY_CFG0_RX_CLAMP_OV, 3));
-	udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_BIG_OV,
+		       FIELD_PREP(ACIOPHY_CFG0_RX_BIG_OV, 3));
+		udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_SMALL_OV,
+		       FIELD_PREP(ACIOPHY_CFG0_RX_SMALL_OV, 3));
+		udelay(10);
+		mask32(atcphy->regs.core + ACIOPHY_CFG0, ACIOPHY_CFG0_RX_CLAMP_OV,
+		       FIELD_PREP(ACIOPHY_CFG0_RX_CLAMP_OV, 3));
+		udelay(10);
+	}
 
 	/* Setup AUX channel if DP altmode is requested */
 	if (atcphy_modes[mode].enable_dp_aux)
