@@ -2150,11 +2150,18 @@ static int atcphy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *sta
 		dev_info(atcphy->dev, "T6000/TBT PHY transition begin\n");
 
 	/*
-	 * If the pipehandler is still/already up here there's a bug somewhere so make sure to
-	 * complain loudly. We can still try to switch modes and hope for the best though,
-	 * in the worst case the hardware will fall back to USB2-only.
+	 * The USB3 host is torn down asynchronously when a Thunderbolt cable is
+	 * discovered.  On T6000 the Type-C mux callback can arrive first, so put
+	 * the PIPE handler in its dummy state ourselves before changing all four
+	 * lanes to TBT.  A WARN here is fatal on panic-on-warn configurations and
+	 * leaves the PHY half switched.
 	 */
-	WARN_ON_ONCE(atcphy->pipehandler_up);
+	if (atcphy->pipehandler_up) {
+		ret = atcphy_configure_pipehandler_dummy(atcphy);
+		if (ret)
+			return ret;
+		atcphy->pipehandler_up = false;
+	}
 	ret = atcphy_configure(atcphy, target_mode);
 	if (target_mode == APPLE_ATCPHY_MODE_TBT)
 		dev_info(atcphy->dev, "T6000/TBT PHY transition %s: %d\n",
