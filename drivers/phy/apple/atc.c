@@ -1726,6 +1726,7 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 {
 	int ret = 0;
+	bool tbt = mode == APPLE_ATCPHY_MODE_TBT;
 
 	lockdep_assert_held(&atcphy->lock);
 
@@ -1735,12 +1736,18 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 		return ret;
 	}
 
+	if (tbt)
+		dev_info(atcphy->dev, "T6000/TBT PHY: power on\n");
 	ret = atcphy_power_on(atcphy);
 	if (ret)
 		return ret;
 
+	if (tbt)
+		dev_info(atcphy->dev, "T6000/TBT PHY: apply tunables\n");
 	atcphy_apply_tunables(atcphy, mode);
 
+	if (tbt)
+		dev_info(atcphy->dev, "T6000/TBT PHY: program common controls\n");
 	core_set32(atcphy, AUSPLL_FSM_CTRL, 0x1fe000);
 	core_set32(atcphy, AUSPLL_APB_CMD_OVERRIDE, AUSPLL_APB_CMD_OVERRIDE_UNK28);
 
@@ -1776,6 +1783,8 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 		atcphy_enable_dp_aux(atcphy);
 
 	/* Enable clocks and configure lanes */
+	if (tbt)
+		dev_info(atcphy->dev, "T6000/TBT PHY: program lanes\n");
 	core_set32(atcphy, CIO3PLL_CLK_CTRL, CIO3PLL_CLK_PCLK_EN);
 	core_set32(atcphy, CIO3PLL_CLK_CTRL, CIO3PLL_CLK_REFCLK_EN);
 	atcphy_configure_lanes(atcphy, mode);
