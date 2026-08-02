@@ -663,6 +663,26 @@
 		orientation-switch;
 		mode-switch;
 
+		/*
+		 * T6000 ATC AXI-to-fabric setup observed on macOS before the
+		 * power-controller small/big wake sequence.  These registers are
+		 * reset by the Linux probe power-off path and must be restored before
+		 * the controller transitions from USB3 to Thunderbolt.
+		 */
+		apple,tunable-axi2af = <0x000 0xffffffff 0x00000011>,
+			<0x010 0xffffffff 0x000d0000>,
+			<0x014 0xffffffff 0x00000001>,
+			<0x018 0xffffffff 0x00000001>,
+			<0x01c 0xffffffff 0x00000003>,
+			<0x020 0xffffffff 0x00000003>,
+			<0x024 0xffffffff 0x00000003>,
+			<0x028 0xffffffff 0x00000003>,
+			<0x02c 0xffffffff 0x00000003>,
+			<0x400 0xffffffff 0x40a10302>,
+			<0x600 0xffffffff 0x01ffffff>,
+			<0x900 0xffffffff 0x00000000>,
+			<0x930 0xffffffff 0x00000000>;
+
 		/* T6000 ATC PHY fabric / USB ACIO-PHY tuning from the macOS ADT. */
 		apple,tunable-common-a = <0x45004 0x3f003f 0x200020>,
 			<0x4500c 0xf1 0xa1>, <0x45010 0x801f 0x4>,
