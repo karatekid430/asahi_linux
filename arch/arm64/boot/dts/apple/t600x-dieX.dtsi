@@ -753,10 +753,16 @@
 
 		mboxes = <&DIE_NODE(usb4_0_mbox)>;
 
-		/* These are managed explicitly while a USB4/TBT cable is present. */
+		/*
+		 * ACIO's ADT has three power gates plus a separate PCIe clock gate.
+		 * Keep the ATC PCIe domain on while starting the M3; without it the
+		 * RC aperture faults on T6000 even though the three CIO domains report
+		 * active.
+		 */
 		power-domains = <&DIE_NODE(ps_atc0_cio)>,
 			<&DIE_NODE(ps_atc0_cio_pcie)>,
-			<&DIE_NODE(ps_atc0_cio_usb)>;
+			<&DIE_NODE(ps_atc0_cio_usb)>,
+			<&DIE_NODE(ps_atc0_pcie)>;
 
 		thunderbolt-switch;
 
