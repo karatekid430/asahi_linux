@@ -129,6 +129,8 @@ struct apple_cio {
 
 	void __iomem *ctrl_base;
 	bool skip_ctrl_handshake;
+	void __iomem *fabric_rx_base;
+	void __iomem *fabric_tx_base;
 
 	struct dev_pm_domain_list *pd_list;
 
@@ -552,6 +554,44 @@ static int apple_cio_stop(struct apple_cio *acio)
 	return 0;
 }
 
+struct apple_cio_regval {
+	u16 offset;
+	u32 value;
+};
+
+/* T6000 router-fabric setup observed after M3 READY, before NHI access. */
+static const struct apple_cio_regval t6000_fabric_rx_init[] = {
+	{ 0x04, 0x00400040 }, { 0x08, 0x00000004 },
+	{ 0x10, 0x00000040 }, { 0x14, 0x00000004 },
+	{ 0x1c, 0x00000010 }, { 0x24, 0x00000004 },
+	{ 0x2c, 0x00000010 }, { 0x30, 0x00000004 },
+	{ 0x38, 0x01010101 }, { 0x3c, 0x00000101 },
+	{ 0x40, 0x00000001 }, { 0x44, 0x01010101 },
+	{ 0x48, 0x00000001 }, { 0x4c, 0x00000004 },
+};
+
+static const struct apple_cio_regval t6000_fabric_tx_init[] = {
+	{ 0x04, 0x00040004 }, { 0x08, 0x00000004 },
+	{ 0x10, 0x00040004 }, { 0x18, 0x00000004 },
+	{ 0x20, 0x00040004 }, { 0x28, 0x00000004 },
+	{ 0x30, 0x00000004 }, { 0x38, 0x00000004 },
+	{ 0x40, 0x00000004 }, { 0x48, 0x00000004 },
+	{ 0x50, 0x00000004 }, { 0x58, 0x00000004 },
+	{ 0x60, 0x00000004 },
+};
+
+static void apple_cio_t6000_fabric_init(struct apple_cio *acio)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(t6000_fabric_rx_init); i++)
+		writel(t6000_fabric_rx_init[i].value,
+		       acio->fabric_rx_base + t6000_fabric_rx_init[i].offset);
+	for (i = 0; i < ARRAY_SIZE(t6000_fabric_tx_init); i++)
+		writel(t6000_fabric_tx_init[i].value,
+		       acio->fabric_tx_base + t6000_fabric_tx_init[i].offset);
+}
+
 static int apple_cio_start(struct apple_cio *acio)
 {
 	struct device_link *link;
@@ -586,8 +626,8 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	/*
 	 * T8103 requires a handshake through the ACIO control aperture before
-	 * starting the M3.  T6000 does not use this aperture; touching it raises
-	 * an asynchronous SError.
+	 * starting the M3.  T6000 uses a different control protocol, so its early
+	 * startup must not perform this request/poll sequence.
 	 */
 	if (!acio->skip_ctrl_handshake) {
 		writel(APPLE_CIO_CTRL_STATUS_INIT_REQ,
@@ -599,23 +639,6 @@ static int apple_cio_start(struct apple_cio *acio)
 			goto remove_links;
 		}
 		dev_dbg(acio->dev, "ACIO block has started\n");
-	}
-
-	/*
-	 * T6000's ACIO firmware is brought up by its power domains.  macOS then
-	 * accesses the NHI directly; it does not access the legacy control/M3
-	 * apertures or boot an RTKit instance from the AP.
-	 */
-	if (acio->skip_ctrl_handshake) {
-		reinit_completion(&acio->nhi_boot_completion);
-		ret = of_platform_populate(acio->np, NULL, NULL, acio->dev);
-		if (ret) {
-			dev_err(acio->dev, "failed to populate children: %d\n", ret);
-			goto remove_links;
-		}
-
-		wait_for_completion(&acio->nhi_boot_completion);
-		return 0;
 	}
 
 	/* Start and wait for the co-processor to boot */
@@ -647,6 +670,8 @@ static int apple_cio_start(struct apple_cio *acio)
 		apple_tunable_apply(acio->rc_base, acio->rc_tunable);
 		dev_dbg(acio->dev, "RC tunables have been applied\n");
 	}
+	if (acio->skip_ctrl_handshake)
+		apple_cio_t6000_fabric_init(acio);
 	if (acio->pcie_tunable) {
 		apple_tunable_apply(acio->pcie_base, acio->pcie_tunable);
 		dev_dbg(acio->dev, "PCIe adapter tunables have been applied\n");
@@ -762,6 +787,7 @@ static int apple_cio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct apple_cio *acio;
+	struct resource *res;
 	int ret;
 
 	acio = devm_kzalloc(dev, sizeof(*acio), GFP_KERNEL);
@@ -794,6 +820,19 @@ static int apple_cio_probe(struct platform_device *pdev)
 		if (IS_ERR(acio->rc_tunable))
 			return dev_err_probe(dev, PTR_ERR(acio->rc_tunable),
 					     "Unable to load rc tunable");
+	}
+
+	if (acio->skip_ctrl_handshake) {
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "fabric-rx");
+		acio->fabric_rx_base = devm_ioremap_resource(dev, res);
+		if (IS_ERR(acio->fabric_rx_base))
+			return dev_err_probe(dev, PTR_ERR(acio->fabric_rx_base),
+					     "Unable to map RX fabric regs");
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "fabric-tx");
+		acio->fabric_tx_base = devm_ioremap_resource(dev, res);
+		if (IS_ERR(acio->fabric_tx_base))
+			return dev_err_probe(dev, PTR_ERR(acio->fabric_tx_base),
+					     "Unable to map TX fabric regs");
 	}
 
 	acio->pcie_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie");
