@@ -63,6 +63,7 @@
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/pm_domain.h>
+#include <linux/pm_runtime.h>
 #include <linux/phy/phy.h>
 #include <linux/soc/apple/rtkit.h>
 #include <linux/soc/apple/tunable.h>
@@ -134,6 +135,7 @@ struct apple_cio {
 	void __iomem *fabric_tx_base;
 
 	struct dev_pm_domain_list *pd_list;
+	bool pd_runtime_refs;
 
 	struct mutex lock;
 
@@ -543,6 +545,13 @@ static int apple_cio_stop(struct apple_cio *acio)
 	}
 	dev_dbg(acio->dev, "RTKit is freed\n");
 
+	/* Drop our synchronous power-on references before releasing the links. */
+	if (acio->pd_runtime_refs) {
+		for (i = 0; i < acio->pd_list->num_pds; i++)
+			pm_runtime_put(acio->pd_list->pd_devs[i]);
+		acio->pd_runtime_refs = false;
+	}
+
 	/* Finally, remove the links to the PD domains to power everything off */
 	for (i = 0; i < acio->pd_list->num_pds; i++) {
 		if (acio->pd_list->pd_links[i])
@@ -596,7 +605,7 @@ static void apple_cio_t6000_fabric_init(struct apple_cio *acio)
 static int apple_cio_start(struct apple_cio *acio)
 {
 	struct device_link *link;
-	int i, ret;
+	int i, ret, powered = 0;
 	u32 state;
 
 	/* Create device links to the power domains in order to power them on */
@@ -616,14 +625,15 @@ static int apple_cio_start(struct apple_cio *acio)
 	 * block until runtime PM has made every explicitly-managed domain active.
 	 */
 	for (i = 0; i < acio->pd_list->num_pds; i++) {
-		if (pm_runtime_active(acio->pd_list->pd_devs[i]))
-			continue;
-
-		dev_err(acio->dev, "ACIO power domain %s did not become active\n",
-			dev_name(acio->pd_list->pd_devs[i]));
-		ret = -EAGAIN;
-		goto remove_links;
+		ret = pm_runtime_resume_and_get(acio->pd_list->pd_devs[i]);
+		if (ret < 0) {
+			dev_err(acio->dev, "failed to power ACIO domain %s: %d\n",
+				dev_name(acio->pd_list->pd_devs[i]), ret);
+			goto put_runtime_refs;
+		}
+		powered++;
 	}
+	acio->pd_runtime_refs = true;
 
 	/*
 	 * T8103 requires a handshake through the ACIO control aperture before
@@ -710,6 +720,10 @@ err_shutdown_rtkit:
 	/* Ignore errors here since we're about to cut power to the entire block anyway */
 	apple_rtkit_poweroff(acio->rtk);
 	apple_rtkit_free(acio->rtk);
+put_runtime_refs:
+	while (powered--)
+		pm_runtime_put(acio->pd_list->pd_devs[powered]);
+	acio->pd_runtime_refs = false;
 remove_links:
 	/* Cut power to reset the entire block  */
 	for (i = 0; i < acio->pd_list->num_pds; i++) {
