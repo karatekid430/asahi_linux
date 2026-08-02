@@ -41,3 +41,36 @@
 	compatible = "apple,j314-macaudio", "apple,macaudio";
 	model = "MacBook Pro J314";
 };
+
+/* USB4 / Thunderbolt is wired to the left-rear USB-C connector. */
+/ {
+	aliases {
+		usb4_0_acio = &usb4_0_acio;
+		usb4_0_nhi = &usb4_0_nhi;
+	};
+};
+
+&typec0 {
+	ports {
+		port@2 {
+			reg = <2>;
+			typec0_connector_tbt: endpoint {
+				remote-endpoint = <&usb4_0_acio_tbt>;
+			};
+		};
+	};
+};
+
+&usb4_0_acio {
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			usb4_0_acio_tbt: endpoint {
+				remote-endpoint = <&typec0_connector_tbt>;
+			};
+		};
+	};
+};
