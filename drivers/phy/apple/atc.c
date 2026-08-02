@@ -609,6 +609,8 @@ struct apple_atcphy {
 	struct {
 		void __iomem *core;
 		void __iomem *axi2af;
+		/* T6000-only 16 MiB ATC Thunderbolt control aperture. */
+		void __iomem *tbt;
 		void __iomem *usb2phy;
 		void __iomem *pipehandler;
 		void __iomem *lpdptx;
@@ -1694,6 +1696,75 @@ static void atcphy_usb2_power_on(struct apple_atcphy *atcphy)
 	writel(USB2PHY_USBCTL_RUN, atcphy->regs.usb2phy + USB2PHY_USBCTL);
 }
 
+/*
+ * T6000 has a per-port ATC control aperture outside the normal PHY core
+ * window.  XNU programs it before every USB3-to-Thunderbolt transition.  It
+ * is not present on T8103, and leaving it at reset makes the subsequent ACIO
+ * M3 start generate an asynchronous external abort.
+ *
+ * This is the complete write sequence observed on a J314s running macOS
+ * 14.8.3.  The status reads between several writes only observe the values
+ * written by the preceding step, so retaining the write ordering is enough.
+ */
+static void atcphy_t6000_tbt_bootstrap(struct apple_atcphy *atcphy)
+{
+	void __iomem *tbt = atcphy->regs.tbt;
+
+	set32(tbt + 0x00, BIT(0));
+	mask32(tbt + 0x10, 0x0fff0000, 0x000d0000);
+	set32(tbt + 0x14, BIT(0));
+	set32(tbt + 0x18, BIT(0));
+	set32(tbt + 0x1c, GENMASK(1, 0));
+	set32(tbt + 0x20, GENMASK(1, 0));
+	set32(tbt + 0x24, GENMASK(1, 0));
+	set32(tbt + 0x28, GENMASK(1, 0));
+	set32(tbt + 0x2c, GENMASK(1, 0));
+	writel(0x40a10302, tbt + 0x400);
+	writel(0x01ffffff, tbt + 0x600);
+	writel(0, tbt + 0x900);
+	writel(0, tbt + 0x930);
+	set32(tbt + 0x410, BIT(12));
+	set32(tbt + 0x420, BIT(12));
+	set32(tbt + 0x430, BIT(12));
+	set32(tbt + 0x8000, BIT(3) | BIT(0));
+	set32(tbt + 0x820, BIT(7));
+
+	writel(0x7, tbt + 0x8008);
+	writel(0x1, tbt + 0x8014);
+	writel(0x1, tbt + 0x8018);
+	writel(0x1, tbt + 0x748);
+	writel(0x2, tbt + 0x8208);
+	writel(0x20, tbt + 0x8280);
+	writel(0x3, tbt + 0x8288);
+	writel(0xc, tbt + 0x828c);
+	writel(0x18, tbt + 0x8290);
+	writel(0x30, tbt + 0x8294);
+	writel(0x78, tbt + 0x8298);
+	writel(0xf0, tbt + 0x829c);
+	writel(0x1, tbt + 0x82b8);
+	writel(0x1, tbt + 0x82bc);
+	writel(0x1, tbt + 0x82c0);
+	writel(0x1, tbt + 0x748);
+	writel(0x3, tbt + 0x820c);
+	writel(0x20, tbt + 0x8284);
+	writel(0x3, tbt + 0x82a0);
+	writel(0xc, tbt + 0x82a4);
+	writel(0x18, tbt + 0x82a8);
+	writel(0x30, tbt + 0x82ac);
+	writel(0x78, tbt + 0x82b0);
+	writel(0xf0, tbt + 0x82b4);
+	writel(0x3, tbt + 0x82b8);
+	writel(0x2, tbt + 0x82bc);
+	writel(0x3, tbt + 0x82c0);
+	writel(0, tbt + 0x8210);
+	writel(0xd, tbt + 0x8408);
+	writel(0x3, tbt + 0x8418);
+	writel(0, tbt + 0x841c);
+	writel(~0, tbt + 0x8420);
+	writel(0, tbt + 0x8424);
+	writel(0xfff, tbt + 0x8428);
+}
+
 static int atcphy_power_on(struct apple_atcphy *atcphy)
 {
 	u32 reg;
@@ -1755,6 +1826,8 @@ static int atcphy_configure(struct apple_atcphy *atcphy, enum atcphy_mode mode)
 	 * The generic T8103 ordering programs it after power_on(), which leaves
 	 * a USB3-to-TBT handoff using reset AXI-to-fabric state.
 	 */
+	if (t6000 && tbt)
+		atcphy_t6000_tbt_bootstrap(atcphy);
 	if (t6000 && tbt)
 		apple_tunable_apply(atcphy->regs.axi2af, atcphy->tunables.axi2af);
 
@@ -2249,6 +2322,7 @@ static int atcphy_load_tunables(struct apple_atcphy *atcphy)
 
 static int atcphy_map_resources(struct platform_device *pdev, struct apple_atcphy *atcphy)
 {
+	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 	struct {
 		const char *name;
 		void __iomem **addr;
@@ -2257,12 +2331,16 @@ static int atcphy_map_resources(struct platform_device *pdev, struct apple_atcph
 		{ "core", &atcphy->regs.core, &atcphy->res.core },
 		{ "lpdptx", &atcphy->regs.lpdptx, NULL },
 		{ "axi2af", &atcphy->regs.axi2af, &atcphy->res.axi2af },
+		{ "tbt", &atcphy->regs.tbt, NULL },
 		{ "usb2phy", &atcphy->regs.usb2phy, NULL },
 		{ "pipehandler", &atcphy->regs.pipehandler, NULL },
 	};
 	struct resource *res;
 
 	for (int i = 0; i < ARRAY_SIZE(resources); i++) {
+		if (resources[i].addr == &atcphy->regs.tbt && !t6000)
+			continue;
+
 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, resources[i].name);
 		*resources[i].addr = devm_ioremap_resource(&pdev->dev, res);
 		if (IS_ERR(resources[i].addr))
