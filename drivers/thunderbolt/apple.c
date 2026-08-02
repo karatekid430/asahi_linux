@@ -116,6 +116,14 @@ struct apple_cio {
 	struct resource *rc_res;
 	struct apple_tunable *rc_tunable;
 
+	/*
+	 * T6000 split the PCIe adapter registers from the M3 control block.
+	 * On T8103 both functions live in rc_base.
+	 */
+	void __iomem *pcie_base;
+	struct resource *pcie_res;
+	struct apple_tunable *pcie_tunable;
+
 	struct resource *sram_res;
 	void __iomem *sram_base;
 
@@ -351,7 +359,8 @@ static int apple_nhi_probe(struct platform_device *pdev)
 {
 	struct apple_nhi *anhi;
 	struct apple_tunable *tunable;
-	struct resource *res;
+	struct resource *res, *tunable_res;
+	void __iomem *tunable_base;
 	int cap_apple;
 	int ret = 0;
 
@@ -373,12 +382,27 @@ static int apple_nhi_probe(struct platform_device *pdev)
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(anhi->nhi_base), "Unable to map NHI regs");
 		goto err;
 	}
-	tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np, "apple,tunable-nhi", res);
+	/*
+	 * T6000 top_tunables belong to the ACIO M3 control block, not the
+	 * NHI window.  Keep the original NHI fallback for T8103.
+	 */
+	tunable_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "tunable");
+	if (!tunable_res)
+		tunable_res = res;
+	tunable_base = tunable_res == res ? anhi->nhi_base :
+		devm_ioremap_resource(&pdev->dev, tunable_res);
+	if (IS_ERR(tunable_base)) {
+		ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable_base),
+				    "Unable to map NHI tunable regs");
+		goto err;
+	}
+	tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np, "apple,tunable-nhi",
+					  tunable_res);
 	if (IS_ERR(tunable)) {
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable), "Unable to load NHI tunable");
 		goto err;
 	}
-	apple_tunable_apply(anhi->nhi_base, tunable);
+	apple_tunable_apply(tunable_base, tunable);
 
 	ret = apple_nhi_probe_irqs(anhi);
 	if (ret)
@@ -578,6 +602,10 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	apple_tunable_apply(acio->rc_base, acio->rc_tunable);
 	dev_dbg(acio->dev, "RC tunables have been applied\n");
+	if (acio->pcie_tunable) {
+		apple_tunable_apply(acio->pcie_base, acio->pcie_tunable);
+		dev_dbg(acio->dev, "PCIe adapter tunables have been applied\n");
+	}
 
 	/*
 	 * Bring up devices which are part of ACIO and are now accessibly by the main SoC
@@ -717,6 +745,19 @@ static int apple_cio_probe(struct platform_device *pdev)
 		devm_apple_tunable_parse(dev, acio->np, "apple,tunable-rc", acio->rc_res);
 	if (IS_ERR(acio->rc_tunable))
 		return dev_err_probe(dev, PTR_ERR(acio->rc_tunable), "Unable to load rc tunable");
+
+	acio->pcie_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie");
+	if (acio->pcie_res) {
+		acio->pcie_base = devm_ioremap_resource(dev, acio->pcie_res);
+		if (IS_ERR(acio->pcie_base))
+			return dev_err_probe(dev, PTR_ERR(acio->pcie_base),
+					     "Unable to map PCIe adapter regs");
+		acio->pcie_tunable = devm_apple_tunable_parse(dev, acio->np,
+							      "apple,tunable-pcie", acio->pcie_res);
+		if (IS_ERR(acio->pcie_tunable))
+			return dev_err_probe(dev, PTR_ERR(acio->pcie_tunable),
+					     "Unable to load PCIe adapter tunable");
+	}
 
 	acio->ctrl_base = devm_platform_ioremap_resource_byname(pdev, "ctrl");
 	if (IS_ERR(acio->ctrl_base))

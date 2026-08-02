@@ -678,11 +678,14 @@
 		compatible = "apple,t6000-usb4-acio";
 		reg = <0x7 0x01db0000 0x0 0x30004>,
 			<0x7 0x01ac0000 0x0 0x4000>,
-			<0x7 0x01080000 0x0 0x20000>;
-		reg-names = "ctrl", "rc", "sram";
+			<0x7 0x01080000 0x0 0x20000>,
+			<0x7 0x01ac4000 0x0 0x4000>,
+			<0x7 0x01ac8000 0x0 0x4000>,
+			<0x7 0x01e44000 0x0 0x4000>;
+		reg-names = "ctrl", "rc", "sram", "fabric-rx", "fabric-tx", "pcie";
 
-		/* pcie_adapter_regs_tunables from the T6000 ACIO ADT node. */
-		apple,tunable-rc = <0x1008 0x6 0x6>;
+		/* pcie_adapter_regs_tunables from ACIO reg[5] in the T6000 ADT. */
+		apple,tunable-pcie = <0x1008 0x6 0x6>;
 
 		mboxes = <&DIE_NODE(usb4_0_mbox)>;
 
@@ -708,8 +711,9 @@
 
 		DIE_NODE(usb4_0_nhi): nhi@701f00000 {
 			compatible = "apple,t6000-usb4-nhi";
-			reg = <0x7 0x01f00000 0x0 0x100000>;
-			reg-names = "nhi";
+			reg = <0x7 0x01f00000 0x0 0x100000>,
+				<0x7 0x01ac0000 0x0 0x4000>;
+			reg-names = "nhi", "tunable";
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ DIE_NO 1294 IRQ_TYPE_LEVEL_HIGH>,
 				<AIC_IRQ DIE_NO 1295 IRQ_TYPE_LEVEL_HIGH>,
@@ -847,9 +851,12 @@
 		compatible = "apple,t6000-usb4-acio";
 		reg = <0xb 0x01db0000 0x0 0x30004>,
 			<0xb 0x01ac0000 0x0 0x4000>,
-			<0xb 0x01080000 0x0 0x20000>;
-		reg-names = "ctrl", "rc", "sram";
-		apple,tunable-rc = <0x1008 0x6 0x6>;
+			<0xb 0x01080000 0x0 0x20000>,
+			<0xb 0x01ac4000 0x0 0x4000>,
+			<0xb 0x01ac8000 0x0 0x4000>,
+			<0xb 0x01e44000 0x0 0x4000>;
+		reg-names = "ctrl", "rc", "sram", "fabric-rx", "fabric-tx", "pcie";
+		apple,tunable-pcie = <0x1008 0x6 0x6>;
 		mboxes = <&DIE_NODE(usb4_1_mbox)>;
 		power-domains = <&DIE_NODE(ps_atc1_cio)>,
 			<&DIE_NODE(ps_atc1_cio_pcie)>,
@@ -870,8 +877,9 @@
 
 		DIE_NODE(usb4_1_nhi): nhi@b01f00000 {
 			compatible = "apple,t6000-usb4-nhi";
-			reg = <0xb 0x01f00000 0x0 0x100000>;
-			reg-names = "nhi";
+			reg = <0xb 0x01f00000 0x0 0x100000>,
+				<0xb 0x01ac0000 0x0 0x4000>;
+			reg-names = "nhi", "tunable";
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ DIE_NO 1342 IRQ_TYPE_LEVEL_HIGH>,
 				<AIC_IRQ DIE_NO 1343 IRQ_TYPE_LEVEL_HIGH>,
@@ -1009,9 +1017,12 @@
 		compatible = "apple,t6000-usb4-acio";
 		reg = <0xf 0x01db0000 0x0 0x30004>,
 			<0xf 0x01ac0000 0x0 0x4000>,
-			<0xf 0x01080000 0x0 0x20000>;
-		reg-names = "ctrl", "rc", "sram";
-		apple,tunable-rc = <0x1008 0x6 0x6>;
+			<0xf 0x01080000 0x0 0x20000>,
+			<0xf 0x01ac4000 0x0 0x4000>,
+			<0xf 0x01ac8000 0x0 0x4000>,
+			<0xf 0x01e44000 0x0 0x4000>;
+		reg-names = "ctrl", "rc", "sram", "fabric-rx", "fabric-tx", "pcie";
+		apple,tunable-pcie = <0x1008 0x6 0x6>;
 		mboxes = <&DIE_NODE(usb4_2_mbox)>;
 		power-domains = <&DIE_NODE(ps_atc2_cio)>,
 			<&DIE_NODE(ps_atc2_cio_pcie)>,
@@ -1032,8 +1043,9 @@
 
 		DIE_NODE(usb4_2_nhi): nhi@f01f00000 {
 			compatible = "apple,t6000-usb4-nhi";
-			reg = <0xf 0x01f00000 0x0 0x100000>;
-			reg-names = "nhi";
+			reg = <0xf 0x01f00000 0x0 0x100000>,
+				<0xf 0x01ac0000 0x0 0x4000>;
+			reg-names = "nhi", "tunable";
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ DIE_NO 1390 IRQ_TYPE_LEVEL_HIGH>,
 				<AIC_IRQ DIE_NO 1391 IRQ_TYPE_LEVEL_HIGH>,
