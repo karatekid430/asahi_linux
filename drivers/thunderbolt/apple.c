@@ -128,6 +128,7 @@ struct apple_cio {
 	void __iomem *sram_base;
 
 	void __iomem *ctrl_base;
+	bool skip_ctrl_handshake;
 
 	struct dev_pm_domain_list *pd_list;
 
@@ -581,17 +582,21 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 
 	/*
-	 * After the power domains are on we need to signal and wait for the ACIO block
-	 * to actually start before we can bring up the co-processor.
+	 * T8103 requires a handshake through the ACIO control aperture before
+	 * starting the M3.  On T6000 macOS starts the M3 directly; touching this
+	 * aperture instead raises an asynchronous SError.
 	 */
-	writel(APPLE_CIO_CTRL_STATUS_INIT_REQ, acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
-	ret = readl_poll_timeout(acio->ctrl_base + APPLE_CIO_CTRL_STATUS, state,
-				 state == APPLE_CIO_CTRL_STATUS_INIT_DONE, 100, 100000);
-	if (ret) {
-		dev_err(acio->dev, "ACIO block failed to start: %d\n", ret);
-		goto remove_links;
+	if (!acio->skip_ctrl_handshake) {
+		writel(APPLE_CIO_CTRL_STATUS_INIT_REQ,
+		       acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
+		ret = readl_poll_timeout(acio->ctrl_base + APPLE_CIO_CTRL_STATUS, state,
+					 state == APPLE_CIO_CTRL_STATUS_INIT_DONE, 100, 100000);
+		if (ret) {
+			dev_err(acio->dev, "ACIO block failed to start: %d\n", ret);
+			goto remove_links;
+		}
+		dev_dbg(acio->dev, "ACIO block has started\n");
 	}
-	dev_dbg(acio->dev, "ACIO block has started\n");
 
 	/* Start and wait for the co-processor to boot */
 	writel(APPLE_CIO_M3_CTRL_START, acio->rc_base + APPLE_CIO_M3_CTRL);
@@ -746,6 +751,8 @@ static int apple_cio_probe(struct platform_device *pdev)
 
 	mutex_init(&acio->lock);
 	init_completion(&acio->nhi_boot_completion);
+	acio->skip_ctrl_handshake = of_device_is_compatible(dev->of_node,
+							     "apple,t6000-usb4-acio");
 	acio->pdev = pdev;
 	acio->dev = &pdev->dev;
 	acio->np = dev->of_node;
