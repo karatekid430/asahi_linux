@@ -79,6 +79,7 @@
 #define APPLE_CIO_CTRL_STATUS 0x0
 #define APPLE_CIO_CTRL_STATUS_INIT_REQ 1
 #define APPLE_CIO_CTRL_STATUS_INIT_DONE 4
+#define APPLE_CIO_CTRL_NHI_READY GENMASK(31, 0)
 
 #define APPLE_CIO_M3_CTRL 0x0c
 #define APPLE_CIO_M3_CTRL_START BIT(1)
@@ -691,6 +692,10 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	/* Once NHI is up it will update current_cable_info */
 	wait_for_completion(&acio->nhi_boot_completion);
+	if (acio->skip_ctrl_handshake &&
+	    acio->current_cable_info == acio->target_cable_info)
+		writel(APPLE_CIO_CTRL_NHI_READY,
+		       acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
 	dev_dbg(acio->dev, "NHI boot completed.\n");
 	return 0;
 
