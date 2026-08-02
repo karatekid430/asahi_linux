@@ -182,7 +182,12 @@ $(BOOT_TARGETS): vmlinux
 Image.%: Image
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
-ifeq ($(CONFIG_COMPRESSED_INSTALL),y)
+# EFI zboot images are installed as vmlinuz. Installing the raw Image in this
+# configuration leaves the bootloader's existing vmlinuz entry pointing at the
+# previous kernel.
+ifeq ($(CONFIG_EFI_ZBOOT),y)
+ DEFAULT_KBUILD_IMAGE = $(KBUILD_IMAGE)
+else ifeq ($(CONFIG_COMPRESSED_INSTALL),y)
  DEFAULT_KBUILD_IMAGE = $(KBUILD_IMAGE)
 else
  DEFAULT_KBUILD_IMAGE = $(boot)/Image
