@@ -472,6 +472,9 @@ static const struct of_device_id apple_nhi_match[] = {
 	{
 		.compatible = "apple,t8103-usb4-nhi",
 	},
+	{
+		.compatible = "apple,t6000-usb4-nhi",
+	},
 	{},
 };
 MODULE_DEVICE_TABLE(of, apple_nhi_match);
@@ -760,6 +763,9 @@ static int apple_cio_probe(struct platform_device *pdev)
 static const struct of_device_id apple_acio_match[] = {
 	{
 		.compatible = "apple,t8103-usb4-acio",
+	},
+	{
+		.compatible = "apple,t6000-usb4-acio",
 	},
 	{},
 };
