@@ -57,14 +57,12 @@
 #include <linux/delay.h>
 #include <linux/iopoll.h>
 #include <linux/iommu.h>
-#include <linux/mfd/macsmc.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/pm_domain.h>
-#include <linux/pm_runtime.h>
 #include <linux/phy/phy.h>
 #include <linux/soc/apple/rtkit.h>
 #include <linux/soc/apple/tunable.h>
@@ -81,7 +79,6 @@
 #define APPLE_CIO_CTRL_STATUS 0x0
 #define APPLE_CIO_CTRL_STATUS_INIT_REQ 1
 #define APPLE_CIO_CTRL_STATUS_INIT_DONE 4
-#define APPLE_CIO_CTRL_NHI_READY GENMASK(31, 0)
 
 #define APPLE_CIO_M3_CTRL 0x0c
 #define APPLE_CIO_M3_CTRL_START BIT(1)
@@ -114,31 +111,17 @@ struct apple_cio {
 	struct platform_device *pdev;
 	struct device_node *np;
 	struct apple_rtkit *rtk;
-	struct apple_smc *smc;
-	u32 vdd_cio_enable;
 
 	void __iomem *rc_base;
 	struct resource *rc_res;
 	struct apple_tunable *rc_tunable;
 
-	/*
-	 * T6000 split the PCIe adapter registers from the M3 control block.
-	 * On T8103 both functions live in rc_base.
-	 */
-	void __iomem *pcie_base;
-	struct resource *pcie_res;
-	struct apple_tunable *pcie_tunable;
-
 	struct resource *sram_res;
 	void __iomem *sram_base;
 
 	void __iomem *ctrl_base;
-	bool skip_ctrl_handshake;
-	void __iomem *fabric_rx_base;
-	void __iomem *fabric_tx_base;
 
 	struct dev_pm_domain_list *pd_list;
-	bool pd_runtime_refs;
 
 	struct mutex lock;
 
@@ -368,8 +351,7 @@ static int apple_nhi_probe(struct platform_device *pdev)
 {
 	struct apple_nhi *anhi;
 	struct apple_tunable *tunable;
-	struct resource *res, *tunable_res;
-	void __iomem *tunable_base;
+	struct resource *res;
 	int cap_apple;
 	int ret = 0;
 
@@ -391,30 +373,12 @@ static int apple_nhi_probe(struct platform_device *pdev)
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(anhi->nhi_base), "Unable to map NHI regs");
 		goto err;
 	}
-	/*
-	 * T6000 top_tunables belong to the ACIO M3 control block, not the
-	 * NHI window.  Keep the original NHI fallback for T8103.
-	 */
-	tunable_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "tunable");
-	if (!tunable_res)
-		tunable_res = res;
-	tunable_base = tunable_res == res ? anhi->nhi_base :
-		devm_ioremap_resource(&pdev->dev, tunable_res);
-	if (IS_ERR(tunable_base)) {
-		ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable_base),
-				    "Unable to map NHI tunable regs");
+	tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np, "apple,tunable-nhi", res);
+	if (IS_ERR(tunable)) {
+		ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable), "Unable to load NHI tunable");
 		goto err;
 	}
-	if (of_find_property(anhi->np, "apple,tunable-nhi", NULL)) {
-		tunable = devm_apple_tunable_parse(&pdev->dev, anhi->np,
-						  "apple,tunable-nhi", tunable_res);
-		if (IS_ERR(tunable)) {
-			ret = dev_err_probe(&pdev->dev, PTR_ERR(tunable),
-					    "Unable to load NHI tunable");
-			goto err;
-		}
-		apple_tunable_apply(tunable_base, tunable);
-	}
+	apple_tunable_apply(anhi->nhi_base, tunable);
 
 	ret = apple_nhi_probe_irqs(anhi);
 	if (ret)
@@ -538,22 +502,12 @@ static int apple_cio_stop(struct apple_cio *acio)
 
 	/* Try to shut down and power off the co-processor gracefully */
 	dev_dbg(acio->dev, "shutting RTKit down\n");
-	if (acio->rtk) {
-		ret = apple_rtkit_poweroff(acio->rtk);
-		if (ret)
-			dev_warn(acio->dev,
-				 "Failed to shutdown M3 RTKit, continuing ACIO shutdown anyway\n");
-		apple_rtkit_free(acio->rtk);
-		acio->rtk = NULL;
-	}
+	ret = apple_rtkit_poweroff(acio->rtk);
+	if (ret)
+		dev_warn(acio->dev,
+			 "Failed to shutdown M3 RTKit, continuing ACIO shutdown anyway\n");
+	apple_rtkit_free(acio->rtk);
 	dev_dbg(acio->dev, "RTKit is freed\n");
-
-	/* Drop our synchronous power-on references before releasing the links. */
-	if (acio->pd_runtime_refs) {
-		for (i = 0; i < acio->pd_list->num_pds; i++)
-			pm_runtime_put(acio->pd_list->pd_devs[i]);
-		acio->pd_runtime_refs = false;
-	}
 
 	/* Finally, remove the links to the PD domains to power everything off */
 	for (i = 0; i < acio->pd_list->num_pds; i++) {
@@ -567,48 +521,10 @@ static int apple_cio_stop(struct apple_cio *acio)
 	return 0;
 }
 
-struct apple_cio_regval {
-	u16 offset;
-	u32 value;
-};
-
-/* T6000 router-fabric setup observed after M3 READY, before NHI access. */
-static const struct apple_cio_regval t6000_fabric_rx_init[] = {
-	{ 0x04, 0x00400040 }, { 0x08, 0x00000004 },
-	{ 0x10, 0x00000040 }, { 0x14, 0x00000004 },
-	{ 0x1c, 0x00000010 }, { 0x24, 0x00000004 },
-	{ 0x2c, 0x00000010 }, { 0x30, 0x00000004 },
-	{ 0x38, 0x01010101 }, { 0x3c, 0x00000101 },
-	{ 0x40, 0x00000001 }, { 0x44, 0x01010101 },
-	{ 0x48, 0x00000001 }, { 0x4c, 0x00000004 },
-};
-
-static const struct apple_cio_regval t6000_fabric_tx_init[] = {
-	{ 0x04, 0x00040004 }, { 0x08, 0x00000004 },
-	{ 0x10, 0x00040004 }, { 0x18, 0x00000004 },
-	{ 0x20, 0x00040004 }, { 0x28, 0x00000004 },
-	{ 0x30, 0x00000004 }, { 0x38, 0x00000004 },
-	{ 0x40, 0x00000004 }, { 0x48, 0x00000004 },
-	{ 0x50, 0x00000004 }, { 0x58, 0x00000004 },
-	{ 0x60, 0x00000004 },
-};
-
-static void apple_cio_t6000_fabric_init(struct apple_cio *acio)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(t6000_fabric_rx_init); i++)
-		writel(t6000_fabric_rx_init[i].value,
-		       acio->fabric_rx_base + t6000_fabric_rx_init[i].offset);
-	for (i = 0; i < ARRAY_SIZE(t6000_fabric_tx_init); i++)
-		writel(t6000_fabric_tx_init[i].value,
-		       acio->fabric_tx_base + t6000_fabric_tx_init[i].offset);
-}
-
 static int apple_cio_start(struct apple_cio *acio)
 {
 	struct device_link *link;
-	int i, ret, powered = 0;
+	int i, ret;
 	u32 state;
 
 	/* Create device links to the power domains in order to power them on */
@@ -623,60 +539,19 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 
 	/*
-	 * T6000 raises an asynchronous SError for any ACIO control-register
-	 * access while one of the router domains is still off.  Do not touch the
-	 * block until runtime PM has made every explicitly-managed domain active.
+	 * After the power domains are on we need to signal and wait for the ACIO block
+	 * to actually start before we can bring up the co-processor.
 	 */
-	for (i = 0; i < acio->pd_list->num_pds; i++) {
-		ret = pm_runtime_resume_and_get(acio->pd_list->pd_devs[i]);
-		if (ret < 0) {
-			dev_err(acio->dev, "failed to power ACIO domain %s: %d\n",
-				dev_name(acio->pd_list->pd_devs[i]), ret);
-			goto put_runtime_refs;
-		}
-		powered++;
+	writel(APPLE_CIO_CTRL_STATUS_INIT_REQ, acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
+	ret = readl_poll_timeout(acio->ctrl_base + APPLE_CIO_CTRL_STATUS, state,
+				 state == APPLE_CIO_CTRL_STATUS_INIT_DONE, 100, 100000);
+	if (ret) {
+		dev_err(acio->dev, "ACIO block failed to start: %d\n", ret);
+		goto remove_links;
 	}
-	acio->pd_runtime_refs = true;
-
-	/*
-	 * AppleT6000PMGR enables VDD_CIO through the platform function
-	 * "function-toggle_vdd_cio" before it touches the ACIO M3.  On the
-	 * J314/J316 ADT that function is an SMC pKW4 call for key pmVC, with
-	 * value 0x101.  Without this rail, the first ACIO register transaction
-	 * is reported as an asynchronous SError by the fabric.
-	 */
-	if (acio->vdd_cio_enable) {
-		ret = apple_smc_write_u32(acio->smc, SMC_KEY(pmVC),
-					  acio->vdd_cio_enable);
-		if (ret < 0) {
-			dev_err(acio->dev,
-				"failed to enable T6000 VDD_CIO through SMC pmVC: %d\n", ret);
-			goto put_runtime_refs;
-		}
-		dev_info(acio->dev, "T6000 ACIO: enabled VDD_CIO (pmVC = %#x)\n",
-			 acio->vdd_cio_enable);
-	}
-
-	/*
-	 * T8103 requires a handshake through the ACIO control aperture before
-	 * starting the M3.  T6000 uses a different control protocol, so its early
-	 * startup must not perform this request/poll sequence.
-	 */
-	if (!acio->skip_ctrl_handshake) {
-		writel(APPLE_CIO_CTRL_STATUS_INIT_REQ,
-		       acio->ctrl_base + APPLE_CIO_CTRL_STATUS);
-		ret = readl_poll_timeout(acio->ctrl_base + APPLE_CIO_CTRL_STATUS, state,
-					 state == APPLE_CIO_CTRL_STATUS_INIT_DONE, 100, 100000);
-		if (ret) {
-			dev_err(acio->dev, "ACIO block failed to start: %d\n", ret);
-			goto remove_links;
-		}
-		dev_dbg(acio->dev, "ACIO block has started\n");
-	}
+	dev_dbg(acio->dev, "ACIO block has started\n");
 
 	/* Start and wait for the co-processor to boot */
-	if (acio->skip_ctrl_handshake)
-		dev_info(acio->dev, "T6000 ACIO: starting M3\n");
 	writel(APPLE_CIO_M3_CTRL_START, acio->rc_base + APPLE_CIO_M3_CTRL);
 	acio->rtk = apple_rtkit_init(acio->dev, acio, NULL, 0, &apple_cio_rtkit_ops);
 	if (IS_ERR(acio->rtk)) {
@@ -701,25 +576,13 @@ static int apple_cio_start(struct apple_cio *acio)
 	}
 	dev_dbg(acio->dev, "M3 firmware is ready\n");
 
-	if (acio->rc_tunable) {
-		apple_tunable_apply(acio->rc_base, acio->rc_tunable);
-		dev_dbg(acio->dev, "RC tunables have been applied\n");
-	}
-	if (acio->skip_ctrl_handshake)
-		dev_info(acio->dev, "T6000 ACIO: programming router fabrics\n");
-	if (acio->skip_ctrl_handshake)
-		apple_cio_t6000_fabric_init(acio);
-	if (acio->pcie_tunable) {
-		apple_tunable_apply(acio->pcie_base, acio->pcie_tunable);
-		dev_dbg(acio->dev, "PCIe adapter tunables have been applied\n");
-	}
+	apple_tunable_apply(acio->rc_base, acio->rc_tunable);
+	dev_dbg(acio->dev, "RC tunables have been applied\n");
 
 	/*
 	 * Bring up devices which are part of ACIO and are now accessibly by the main SoC
 	 * and specifically wait for the NHI to be up to prevent concurrent shutdowns.
 	 */
-	if (acio->skip_ctrl_handshake)
-		dev_info(acio->dev, "T6000 ACIO: probing NHI\n");
 	reinit_completion(&acio->nhi_boot_completion);
 	ret = of_platform_populate(acio->np, NULL, NULL, acio->dev);
 	if (ret) {
@@ -730,11 +593,6 @@ static int apple_cio_start(struct apple_cio *acio)
 
 	/* Once NHI is up it will update current_cable_info */
 	wait_for_completion(&acio->nhi_boot_completion);
-	/*
-	 * T6000 control offset 0 is not the T8103 status register.  Accessing it
-	 * after NHI registration has raised an asynchronous SError at 0x701db0000,
-	 * so do not use it as an NHI-ready doorbell until its semantics are known.
-	 */
 	dev_dbg(acio->dev, "NHI boot completed.\n");
 	return 0;
 
@@ -742,10 +600,6 @@ err_shutdown_rtkit:
 	/* Ignore errors here since we're about to cut power to the entire block anyway */
 	apple_rtkit_poweroff(acio->rtk);
 	apple_rtkit_free(acio->rtk);
-put_runtime_refs:
-	while (powered--)
-		pm_runtime_put(acio->pd_list->pd_devs[powered]);
-	acio->pd_runtime_refs = false;
 remove_links:
 	/* Cut power to reset the entire block  */
 	for (i = 0; i < acio->pd_list->num_pds; i++) {
@@ -835,9 +689,6 @@ static int apple_cio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct apple_cio *acio;
-	struct device_node *smc_np;
-	struct platform_device *smc_pdev;
-	struct resource *res;
 	int ret;
 
 	acio = devm_kzalloc(dev, sizeof(*acio), GFP_KERNEL);
@@ -847,29 +698,9 @@ static int apple_cio_probe(struct platform_device *pdev)
 
 	mutex_init(&acio->lock);
 	init_completion(&acio->nhi_boot_completion);
-	acio->skip_ctrl_handshake = of_device_is_compatible(dev->of_node,
-							     "apple,t6000-usb4-acio");
 	acio->pdev = pdev;
 	acio->dev = &pdev->dev;
 	acio->np = dev->of_node;
-
-	if (!of_property_read_u32(acio->np, "apple,vdd-cio-enable",
-				  &acio->vdd_cio_enable)) {
-		smc_np = of_parse_phandle(acio->np, "apple,smc", 0);
-		if (!smc_np)
-			return dev_err_probe(dev, -EINVAL,
-				"VDD_CIO enable requires an Apple SMC\n");
-
-		smc_pdev = of_find_device_by_node(smc_np);
-		of_node_put(smc_np);
-		if (!smc_pdev)
-			return -EPROBE_DEFER;
-
-		acio->smc = dev_get_drvdata(&smc_pdev->dev);
-		put_device(&smc_pdev->dev);
-		if (!acio->smc)
-			return -EPROBE_DEFER;
-	}
 
 	acio->sram_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "sram");
 	if (!acio->sram_res)
@@ -882,39 +713,10 @@ static int apple_cio_probe(struct platform_device *pdev)
 	acio->rc_base = devm_ioremap_resource(&pdev->dev, acio->rc_res);
 	if (IS_ERR(acio->rc_base))
 		return dev_err_probe(dev, PTR_ERR(acio->rc_base), "Unable to map rc regs");
-	if (of_find_property(acio->np, "apple,tunable-rc", NULL)) {
-		acio->rc_tunable = devm_apple_tunable_parse(dev, acio->np,
-							    "apple,tunable-rc", acio->rc_res);
-		if (IS_ERR(acio->rc_tunable))
-			return dev_err_probe(dev, PTR_ERR(acio->rc_tunable),
-					     "Unable to load rc tunable");
-	}
-
-	if (acio->skip_ctrl_handshake) {
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "fabric-rx");
-		acio->fabric_rx_base = devm_ioremap_resource(dev, res);
-		if (IS_ERR(acio->fabric_rx_base))
-			return dev_err_probe(dev, PTR_ERR(acio->fabric_rx_base),
-					     "Unable to map RX fabric regs");
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "fabric-tx");
-		acio->fabric_tx_base = devm_ioremap_resource(dev, res);
-		if (IS_ERR(acio->fabric_tx_base))
-			return dev_err_probe(dev, PTR_ERR(acio->fabric_tx_base),
-					     "Unable to map TX fabric regs");
-	}
-
-	acio->pcie_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "pcie");
-	if (acio->pcie_res) {
-		acio->pcie_base = devm_ioremap_resource(dev, acio->pcie_res);
-		if (IS_ERR(acio->pcie_base))
-			return dev_err_probe(dev, PTR_ERR(acio->pcie_base),
-					     "Unable to map PCIe adapter regs");
-		acio->pcie_tunable = devm_apple_tunable_parse(dev, acio->np,
-							      "apple,tunable-pcie", acio->pcie_res);
-		if (IS_ERR(acio->pcie_tunable))
-			return dev_err_probe(dev, PTR_ERR(acio->pcie_tunable),
-					     "Unable to load PCIe adapter tunable");
-	}
+	acio->rc_tunable =
+		devm_apple_tunable_parse(dev, acio->np, "apple,tunable-rc", acio->rc_res);
+	if (IS_ERR(acio->rc_tunable))
+		return dev_err_probe(dev, PTR_ERR(acio->rc_tunable), "Unable to load rc tunable");
 
 	acio->ctrl_base = devm_platform_ioremap_resource_byname(pdev, "ctrl");
 	if (IS_ERR(acio->ctrl_base))

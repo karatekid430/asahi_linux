@@ -17,11 +17,6 @@
 	model = "Apple MacBook Pro (16-inch, M1 Pro, 2021)";
 };
 
-/* AppleT6000PMGR function-toggle_vdd_cio: SMC pmVC = 0x101. */
-&usb4_0_acio { apple,smc = <&smc>; apple,vdd-cio-enable = <0x101>; };
-&usb4_1_acio { apple,smc = <&smc>; apple,vdd-cio-enable = <0x101>; };
-&usb4_2_acio { apple,smc = <&smc>; apple,vdd-cio-enable = <0x101>; };
-
 &wifi0 {
 	brcm,board-type = "apple,madagascar";
 };

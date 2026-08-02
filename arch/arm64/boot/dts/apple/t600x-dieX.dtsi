@@ -675,7 +675,7 @@
 
 	/* USB4 / Thunderbolt host router for the first USB-C port. */
 	DIE_NODE(usb4_0_acio): usb4@701db0000 {
-		compatible = "apple,t6000-usb4-acio";
+		compatible = "apple,t8103-usb4-acio";
 		reg = <0x7 0x01db0000 0x0 0x30004>,
 			<0x7 0x01ac0000 0x0 0x4000>,
 			<0x7 0x01080000 0x0 0x20000>,
@@ -718,7 +718,7 @@
 		};
 
 		DIE_NODE(usb4_0_nhi): nhi@701f00000 {
-			compatible = "apple,t6000-usb4-nhi";
+			compatible = "apple,t8103-usb4-nhi";
 			reg = <0x7 0x01f00000 0x0 0x100000>,
 				<0x7 0x01ac0000 0x0 0x4000>;
 			reg-names = "nhi", "tunable";
@@ -853,7 +853,7 @@
 
 	/* USB4 / Thunderbolt host router for USB-C port 2. */
 	DIE_NODE(usb4_1_acio): usb4@b01db0000 {
-		compatible = "apple,t6000-usb4-acio";
+		compatible = "apple,t8103-usb4-acio";
 		reg = <0xb 0x01db0000 0x0 0x30004>,
 			<0xb 0x01ac0000 0x0 0x4000>,
 			<0xb 0x01080000 0x0 0x20000>,
@@ -883,7 +883,7 @@
 		};
 
 		DIE_NODE(usb4_1_nhi): nhi@b01f00000 {
-			compatible = "apple,t6000-usb4-nhi";
+			compatible = "apple,t8103-usb4-nhi";
 			reg = <0xb 0x01f00000 0x0 0x100000>,
 				<0xb 0x01ac0000 0x0 0x4000>;
 			reg-names = "nhi", "tunable";
@@ -1018,7 +1018,7 @@
 
 	/* USB4 / Thunderbolt host router for USB-C port 3. */
 	DIE_NODE(usb4_2_acio): usb4@f01db0000 {
-		compatible = "apple,t6000-usb4-acio";
+		compatible = "apple,t8103-usb4-acio";
 		reg = <0xf 0x01db0000 0x0 0x30004>,
 			<0xf 0x01ac0000 0x0 0x4000>,
 			<0xf 0x01080000 0x0 0x20000>,
@@ -1048,7 +1048,7 @@
 		};
 
 		DIE_NODE(usb4_2_nhi): nhi@f01f00000 {
-			compatible = "apple,t6000-usb4-nhi";
+			compatible = "apple,t8103-usb4-nhi";
 			reg = <0xf 0x01f00000 0x0 0x100000>,
 				<0xf 0x01ac0000 0x0 0x4000>;
 			reg-names = "nhi", "tunable";
