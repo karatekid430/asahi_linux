@@ -1696,10 +1696,15 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 {
 	u32 reg;
 	int ret;
+	bool t6000 = of_device_is_compatible(atcphy->np, "apple,t6000-atcphy");
 
 	atcphy_usb2_power_on(atcphy);
+	if (t6000)
+		dev_info(atcphy->dev, "T6000/TBT PHY: USB2 power complete\n");
 
 	core_set32(atcphy, ATCPHY_MISC, ATCPHY_MISC_RESET_N);
+	if (t6000)
+		dev_info(atcphy->dev, "T6000/TBT PHY: misc reset released\n");
 
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_SLEEP_SMALL);
 	ret = readl_poll_timeout(atcphy->regs.core + ATCPHY_POWER_STAT, reg,
@@ -1708,6 +1713,8 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 		dev_err(atcphy->dev, "failed to wakeup atcphy \"small\"\n");
 		return ret;
 	}
+	if (t6000)
+		dev_info(atcphy->dev, "T6000/TBT PHY: small power complete\n");
 
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_SLEEP_BIG);
 	ret = readl_poll_timeout(atcphy->regs.core + ATCPHY_POWER_STAT, reg,
@@ -1716,9 +1723,13 @@ static int atcphy_power_on(struct apple_atcphy *atcphy)
 		dev_err(atcphy->dev, "failed to wakeup atcphy \"big\"\n");
 		return ret;
 	}
+	if (t6000)
+		dev_info(atcphy->dev, "T6000/TBT PHY: big power complete\n");
 
 	core_clear32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_CLAMP_EN);
 	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_APB_RESET_N);
+	if (t6000)
+		dev_info(atcphy->dev, "T6000/TBT PHY: power on complete\n");
 
 	return 0;
 }
