@@ -748,9 +748,6 @@
 				"rxring0", "rxring1", "rxring2", "rxring3",
 				"rxring4", "rxring5", "rxring6", "rxring7",
 				"rxring8", "rxring9", "rxring10", "rxring11";
-			apple,tunable-nhi = <0x0 0xfff0 0x2010>,
-				<0x2c 0x4 0x0>,
-				<0xac 0xffffffff 0x200020>;
 			iommus = <&DIE_NODE(usb4_0_dart) 1>;
 		};
 	};
@@ -916,9 +913,6 @@
 				"rxring0", "rxring1", "rxring2", "rxring3",
 				"rxring4", "rxring5", "rxring6", "rxring7",
 				"rxring8", "rxring9", "rxring10", "rxring11";
-			apple,tunable-nhi = <0x0 0xfff0 0x2010>,
-				<0x2c 0x4 0x0>,
-				<0xac 0xffffffff 0x200020>;
 			iommus = <&DIE_NODE(usb4_1_dart) 1>;
 		};
 	};
@@ -1084,9 +1078,6 @@
 				"rxring0", "rxring1", "rxring2", "rxring3",
 				"rxring4", "rxring5", "rxring6", "rxring7",
 				"rxring8", "rxring9", "rxring10", "rxring11";
-			apple,tunable-nhi = <0x0 0xfff0 0x2010>,
-				<0x2c 0x4 0x0>,
-				<0xac 0xffffffff 0x4000400>;
 			iommus = <&DIE_NODE(usb4_2_dart) 1>;
 		};
 	};
